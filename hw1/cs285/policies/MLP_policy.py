@@ -21,26 +21,21 @@ from cs285.infrastructure import pytorch_util as ptu
 from cs285.policies.base_policy import BasePolicy
 
 
-def build_mlp(
-        input_size: int,
-        output_size: int,
-        n_layers: int,
-        size: int
-) -> nn.Module:
+def build_mlp(input_size: int, output_size: int, n_layers: int, size: int) -> nn.Module:
     """
-        Builds a feedforward neural network
+    Builds a feedforward neural network
 
-        arguments:
-            n_layers: number of hidden layers
-            size: dimension of each hidden layer
-            activation: activation of each hidden layer
+    arguments:
+        n_layers: number of hidden layers
+        size: dimension of each hidden layer
+        activation: activation of each hidden layer
 
-            input_size: size of the input layer
-            output_size: size of the output layer
-            output_activation: activation of the output layer
+        input_size: size of the input layer
+        output_size: size of the output layer
+        output_activation: activation of the output layer
 
-        returns:
-            MLP (nn.Module)
+    returns:
+        MLP (nn.Module)
     """
     layers = []
     in_size = input_size
@@ -73,16 +68,18 @@ class MLPPolicySL(BasePolicy, nn.Module, metaclass=abc.ABCMeta):
     update:
         Trains the policy with a supervised learning objective
     """
-    def __init__(self,
-                 ac_dim,
-                 ob_dim,
-                 n_layers,
-                 size,
-                 learning_rate=1e-4,
-                 training=True,
-                 nn_baseline=False,
-                 **kwargs
-                 ):
+
+    def __init__(
+        self,
+        ac_dim,
+        ob_dim,
+        n_layers,
+        size,
+        learning_rate=1e-4,
+        training=True,
+        nn_baseline=False,
+        **kwargs
+    ):
         super().__init__(**kwargs)
 
         # init vars
@@ -97,23 +94,21 @@ class MLPPolicySL(BasePolicy, nn.Module, metaclass=abc.ABCMeta):
         self.mean_net = build_mlp(
             input_size=self.ob_dim,
             output_size=self.ac_dim,
-            n_layers=self.n_layers, size=self.size,
+            n_layers=self.n_layers,
+            size=self.size,
         )
         self.mean_net.to(ptu.device)
         self.logstd = nn.Parameter(
-
             torch.zeros(self.ac_dim, dtype=torch.float32, device=ptu.device)
         )
         self.logstd.to(ptu.device)
         self.optimizer = optim.Adam(
             itertools.chain([self.logstd], self.mean_net.parameters()),
-            self.learning_rate
+            self.learning_rate,
         )
 
     def save(self, filepath):
-        """
-        :param filepath: path to save MLP
-        """
+        """:param filepath: path to save MLP"""
         torch.save(self.state_dict(), filepath)
 
     def forward(self, observation: torch.FloatTensor) -> Any:
@@ -124,12 +119,10 @@ class MLPPolicySL(BasePolicy, nn.Module, metaclass=abc.ABCMeta):
         :return:
             action: sampled action(s) from the policy
         """
-        # TODO: implement the forward pass of the network.
-        # You can return anything you want, but you should be able to differentiate
-        # through it. For example, you can return a torch.FloatTensor. You can also
-        # return more flexible objects, such as a
-        # `torch.distributions.Distribution` object. It's up to you!
-        raise NotImplementedError
+        mean = self.mean_net(observation)
+        std = self.logstd.exp()
+
+        return distributions.Independent(distributions.Normal(mean, std), 1)
 
     def update(self, observations, actions):
         """
@@ -140,9 +133,25 @@ class MLPPolicySL(BasePolicy, nn.Module, metaclass=abc.ABCMeta):
         :return:
             dict: 'Training Loss': supervised learning loss
         """
-        # TODO: update the policy and return the loss
-        loss = TODO
+        observations = ptu.from_numpy(observations)
+        actions = ptu.from_numpy(actions)
+
+        action_distributions = self(observations)
+        loss = -action_distributions.log_prob(actions).mean()
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
         return {
-            # You can add extra logging information here, but keep this line
-            'Training Loss': ptu.to_numpy(loss),
+            "Training Loss": ptu.to_numpy(loss),
         }
+
+    @torch.no_grad()
+    def get_action(self, observation):
+        observation = ptu.from_numpy(observation)[None]
+
+        action_distribution = self(observation)
+        action = action_distribution.sample()
+
+        return ptu.to_numpy(action)
